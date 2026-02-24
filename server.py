@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 # -------------------------
 
 # Option A (recommended): local folder where your update_model writes CSVs
-DATA_DIR = os.getenv("C:\Users\Brody\Desktop\cbb-sharp-data", os.getcwd())
+DATA_DIR = os.getenv("SHARP_DATA_DIR", os.getcwd())
 
 # Option B: GitHub raw base (fallback)
 # Example: https://raw.githubusercontent.com/Vision919/cbb-sharp-data/main
