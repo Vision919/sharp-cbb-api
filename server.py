@@ -190,6 +190,45 @@ def sharp_game(
     }
 
 
+@app.get("/sharp/table/{table_name}/preview")
+def table_preview(
+    table_name: str,
+    n: int = Query(default=25, ge=1, le=200),
+    x_api_key: Optional[str] = Header(default=None),
+):
+    _require_api_key(x_api_key)
+    if table_name not in FILES:
+        raise HTTPException(status_code=404, detail="Unknown table")
+    df = _get_df(table_name)
+    return {"ok": True, "table": table_name, "rows": int(df.shape[0]), "cols": df.columns.tolist(), "data": _df_to_records(df, limit=n)}
+
+
+@app.get("/sharp/team")
+def team_lookup(
+    team: str = Query(..., description="Team name fragment"),
+    x_api_key: Optional[str] = Header(default=None),
+    max_results: int = Query(default=50, ge=1, le=200),
+):
+    _require_api_key(x_api_key)
+    out: Dict[str, Any] = {"ok": True, "query": team, "kenpom": [], "players": []}
+    team_l = team.strip().lower()
+    # KenPom: try common team column names
+    kp = _get_df("kenpom").copy()
+    kp_cols = {c.lower(): c for c in kp.columns}
+    kp_team_col = kp_cols.get("team") or kp_cols.get("school") or kp_cols.get("team_name")
+    if kp_team_col:
+        m = kp[kp[kp_team_col].astype(str).str.lower().str.contains(team_l)].head(max_results)
+        out["kenpom"] = _df_to_records(m)
+    # Players: column "Team" expected
+    pl = _get_df("players").copy()
+    pl_cols = {c.lower(): c for c in pl.columns}
+    pl_team_col = pl_cols.get("team") or pl_cols.get("school")
+    if pl_team_col:
+        m = pl[pl[pl_team_col].astype(str).str.lower().str.contains(team_l)].head(max_results)
+        out["players"] = _df_to_records(m)
+    return out
+
+
 # Run:
 #   pip install fastapi uvicorn pandas requests
 #   uvicorn server:app --host 0.0.0.0 --port 8000
