@@ -16,12 +16,11 @@ from fastapi.middleware.cors import CORSMiddleware
 # Config
 # -------------------------
 
-# Option A (recommended): local folder where your update_model writes CSVs
-DATA_DIR = os.getenv("SHARP_DATA_DIR", os.getcwd())
-
-# Option B: GitHub raw base (fallback)
-# Example: https://raw.githubusercontent.com/Vision919/cbb-sharp-data/main
-GITHUB_RAW_BASE = os.getenv("SHARP_GITHUB_RAW_BASE", "").rstrip("/")
+# Always prefer GitHub raw (freshest)
+try:
+    df = _read_csv_github(FILES[key])
+except Exception:
+    df = _read_csv_local(_local_path(key))
 
 # Optional simple auth for Actions (recommended)
 # Set SHARP_API_KEY on server and set the same key in GPT Action headers.
