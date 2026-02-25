@@ -16,16 +16,15 @@ from fastapi.middleware.cors import CORSMiddleware
 # Config
 # -------------------------
 
-# Always prefer GitHub raw (freshest)
-try:
-    df = _read_csv_github(FILES[key])
-except Exception:
-    df = _read_csv_local(_local_path(key))
+# Local folder (optional). On Render this is typically the app working dir.
+DATA_DIR = os.getenv("SHARP_DATA_DIR", os.getcwd())
+
+# GitHub raw base (recommended primary source)
+# Example: https://raw.githubusercontent.com/Vision919/cbb-sharp-data/main
+GITHUB_RAW_BASE = os.getenv("SHARP_GITHUB_RAW_BASE", "").rstrip("/")
 
 # Optional simple auth for Actions (recommended)
 # Set SHARP_API_KEY on server and set the same key in GPT Action headers.
-# NOTE: you had os.getenv("9181","") which is almost certainly a mistake.
-# Leaving it as-is would silently disable auth. This is the correct env var name:
 SHARP_API_KEY = os.getenv("SHARP_API_KEY", "")
 
 # CSV filenames your pipeline produces
@@ -36,8 +35,8 @@ FILES = {
     "slate": os.getenv("SHARP_SLATE_FILE", "active_slate.csv"),
 }
 
-# Cache to avoid re-reading every request
-CACHE_TTL_SECONDS = 0
+# Cache to avoid re-reading every request (0 = disable cache)
+CACHE_TTL_SECONDS = int(os.getenv("SHARP_CACHE_TTL", "0"))
 
 
 @dataclass
@@ -69,7 +68,7 @@ def _read_csv_local(path: str) -> pd.DataFrame:
 
 def _read_csv_github(filename: str) -> pd.DataFrame:
     if not GITHUB_RAW_BASE:
-        raise FileNotFoundError("No GitHub base configured and local file missing.")
+        raise FileNotFoundError("GitHub raw base not configured.")
     # Cache-bust to avoid CDN staleness
     url = f"{GITHUB_RAW_BASE}/{filename}?v={int(time.time())}"
     r = requests.get(url, timeout=20)
@@ -78,17 +77,23 @@ def _read_csv_github(filename: str) -> pd.DataFrame:
 
 
 def _get_df(key: str) -> pd.DataFrame:
+    """Fetch a bridge table as a DataFrame.
+
+    IMPORTANT:
+    - Prefer GitHub raw first (freshest, fixes stale Render-local files).
+    - Fall back to local only if GitHub fetch fails.
+    """
     now = time.time()
     cached = _cache.get(key)
     if cached and (now - cached.ts) < CACHE_TTL_SECONDS:
         return cached.df
 
-    # Try local first
+    # Prefer GitHub raw first (freshest)
     try:
-        df = _read_csv_local(_local_path(key))
-    except Exception:
-        # Fallback to GitHub raw
         df = _read_csv_github(FILES[key])
+    except Exception:
+        # Fallback to local
+        df = _read_csv_local(_local_path(key))
 
     # Normalize column names (strip whitespace)
     df.columns = [str(c).strip() for c in df.columns]
@@ -98,25 +103,22 @@ def _get_df(key: str) -> pd.DataFrame:
 
 
 def _df_to_records(df: pd.DataFrame, limit: Optional[int] = None) -> List[Dict[str, Any]]:
-    """
-    Convert a DataFrame to JSON-safe records:
+    """Convert a DataFrame to JSON-safe records:
       - NaN -> None
       - +inf/-inf -> None
-    This prevents: ValueError: Out of range float values are not JSON compliant
+    Prevents: ValueError: Out of range float values are not JSON compliant
     """
     if limit is not None:
         df = df.head(limit)
 
     safe = df.copy()
-
-    # Replace infinities with NaN first, then NaN -> None
     safe = safe.replace([np.inf, -np.inf], np.nan)
     safe = safe.where(pd.notnull(safe), None)
 
     return safe.to_dict(orient="records")
 
 
-app = FastAPI(title="Sharp-CBB Data API", version="2.0")
+app = FastAPI(title="Sharp-CBB Data API", version="2.1")
 
 # Allow your Custom GPT / browser origins
 app.add_middleware(
@@ -132,7 +134,12 @@ app.add_middleware(
 def health(x_api_key: Optional[str] = Header(default=None)) -> Dict[str, Any]:
     _require_api_key(x_api_key)
 
-    status: Dict[str, Any] = {"ok": True, "data_dir": DATA_DIR, "github_raw_base": GITHUB_RAW_BASE or None}
+    status: Dict[str, Any] = {
+        "ok": True,
+        "data_dir": DATA_DIR,
+        "github_raw_base": GITHUB_RAW_BASE or None,
+        "cache_ttl_seconds": CACHE_TTL_SECONDS,
+    }
     for k in FILES:
         lp = _local_path(k)
         status[f"{k}_local_exists"] = os.path.exists(lp)
@@ -219,7 +226,7 @@ def table_preview(
         "ok": True,
         "table": table_name,
         "rows": int(df.shape[0]),
-        "cols": [str(c) for c in df.columns.tolist()],  # ✅ JSON-safe
+        "cols": [str(c) for c in df.columns.tolist()],
         "data": _df_to_records(df, limit=n),
     }
 
