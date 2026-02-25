@@ -220,7 +220,7 @@ def table_preview(
         "ok": True,
         "table": table_name,
         "rows": int(df.shape[0]),
-        "cols": df.columns.tolist(),
+        "cols": [str(c) for c in df.columns.tolist()],  # ✅ JSON-safe
         "data": _df_to_records(df, limit=n),
     }
 
