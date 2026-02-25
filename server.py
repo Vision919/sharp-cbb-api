@@ -38,7 +38,7 @@ FILES = {
 }
 
 # Cache to avoid re-reading every request
-CACHE_TTL_SECONDS = int(os.getenv("SHARP_CACHE_TTL", "30"))
+CACHE_TTL_SECONDS = 0
 
 
 @dataclass
