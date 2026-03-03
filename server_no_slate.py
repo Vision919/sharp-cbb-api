@@ -31,8 +31,8 @@ FILES = {
     "kenpom": os.getenv("SHARP_KENPOM_FILE", "kenpom_live.csv"),
     "vegas": os.getenv("SHARP_VEGAS_FILE", "vegas_odds.csv"),
     "players": os.getenv("SHARP_PLAYERS_FILE", "player_stats.csv"),
-    # NOTE: slate is OPTIONAL in this build.
-    "slate": os.getenv("SHARP_SLATE_FILE", "active_slate.csv"),
+    # "slate": os.getenv("SHARP_SLATE_FILE", "active_slate.csv"),  # if you removed slate
+    "teamrankings": os.getenv("SHARP_TEAMRANKINGS_FILE", "teamrankings_live.csv"),
 }
 
 # Cache to avoid re-reading every request (0 = disable cache)
@@ -176,7 +176,7 @@ def sharp_data(
 
     payload: Dict[str, Any] = {"ok": True, "generated_at_unix": int(time.time()), "tables": {}}
 
-    for key in ["kenpom", "vegas", "players", "slate"]:
+    for key in ["kenpom", "vegas", "players", "teamrankings"]:
         df, missing, err = _get_df_soft(key)
 
         table_info: Dict[str, Any] = {
