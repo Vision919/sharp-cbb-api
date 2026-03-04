@@ -290,6 +290,121 @@ def team_lookup(
 
     return out
 
+diff --git a/server_fixed.py b/server_fixed.py
+--- a/server_fixed.py
++++ b/server_fixed.py
+@@
+ TABLE_PATHS = {
+     "kenpom": os.path.join(DATA_DIR, "kenpom_live.csv"),
+     "vegas": os.path.join(DATA_DIR, "vegas_odds.csv"),
+     "players": os.path.join(DATA_DIR, "players_live.csv"),
+-    "slate": os.path.join(DATA_DIR, "active_slate.csv"),
++    "slate": os.path.join(DATA_DIR, "active_slate.csv"),
++    "teamrankings": os.path.join(DATA_DIR, "teamrankings_live.csv"),
+ }
+ 
++def _normalize_team(name: str) -> str:
++    s = (name or "").lower().strip()
++    s = s.replace("&", "and")
++    s = re.sub(r"[\.\'’]", "", s)
++    s = re.sub(r"\s+", " ", s)
++    # mirror the normalizer you used in teamrankings scraper
++    s = s.replace("st ", "state ")
++    s = s.replace("st-", "state ")
++    s = s.replace("st.", "state")
++    return s
++
+ def load_table(table_name: str) -> pd.DataFrame:
+     path = TABLE_PATHS.get(table_name)
+     if not path or not os.path.exists(path):
+         return pd.DataFrame()
+     df = pd.read_csv(path)
+     return df
+ 
+@@
+ @app.get("/sharp/table/{table_name}/preview")
+ def tablePreview(table_name: str, n: int = 25):
+-    if table_name not in {"kenpom", "vegas", "players", "slate"}:
++    if table_name not in {"kenpom", "vegas", "players", "slate", "teamrankings"}:
+         return {"ok": False, "error": "Unknown table name"}
+     df = load_table(table_name)
+     cols = df.columns.tolist() if not df.empty else []
+     data = df.head(n).to_dict(orient="records") if not df.empty else []
+     return {
+         "ok": True,
+         "table": table_name,
+         "rows": int(len(df)),
+         "cols": cols,
+         "missing": df.empty,
+         "data": data
+     }
+ 
+@@
+ @app.get("/sharp/data")
+ def getSharpData(include_rows: bool = True, preview_rows: int = 0):
+     tables = {}
+     for tname in ["kenpom", "vegas", "players", "slate"]:
+         df = load_table(tname)
+         tables[tname] = {
+             "rows": int(len(df)),
+             "cols": df.columns.tolist() if not df.empty else [],
+             "missing": df.empty
+         }
++    # add teamrankings to the ledger (no heavy payload)
++    tr = load_table("teamrankings")
++    tables["teamrankings"] = {
++        "rows": int(len(tr)),
++        "cols": tr.columns.tolist() if not tr.empty else [],
++        "missing": tr.empty
++    }
+ 
+     out = {"ok": True, "generated_at_unix": int(time.time()), "tables": tables}
+     return out
+ 
+@@
+ @app.get("/sharp/team")
+ def team_lookup(team: str, max_results: int = 50):
+     kenpom = load_table("kenpom")
+     players = load_table("players")
++    teamrankings = load_table("teamrankings")
+ 
+     q = (team or "").strip().lower()
+ 
+     # KenPom match
+     kp = []
+     if not kenpom.empty and "Team" in kenpom.columns:
+         mask = kenpom["Team"].astype(str).str.lower().str.contains(q, na=False)
+         kp = kenpom.loc[mask].head(max_results).to_dict(orient="records")
+ 
+     # Players match
+     pr = []
+     if not players.empty and "Team" in players.columns:
+         mask = players["Team"].astype(str).str.lower().str.contains(q, na=False)
+         pr = players.loc[mask].head(max_results).to_dict(orient="records")
+ 
++    # TeamRankings match (by Team_norm if present; fallback to Team)
++    tr_rows = []
++    if not teamrankings.empty:
++        if "Team_norm" in teamrankings.columns:
++            qn = _normalize_team(team)
++            mask = teamrankings["Team_norm"].astype(str).str.contains(qn, na=False)
++        elif "Team" in teamrankings.columns:
++            mask = teamrankings["Team"].astype(str).str.lower().str.contains(q, na=False)
++        else:
++            mask = None
++        if mask is not None:
++            tr_rows = teamrankings.loc[mask].head(max_results).to_dict(orient="records")
++
+     return {
+         "ok": True,
+         "query": team,
+-        "kenpom": kp,
+-        "players": pr
++        "kenpom": kp,
++        "players": pr,
++        "teamrankings": tr_rows
+     }
+
 
 # Run:
 #   pip install fastapi uvicorn pandas requests numpy
